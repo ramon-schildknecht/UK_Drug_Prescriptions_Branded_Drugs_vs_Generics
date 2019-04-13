@@ -1,7 +1,7 @@
-name: "drugs_comparison_branded_vs_generic"
+name: drugs_comparison_branded_vs_generic
 output_dir: ../docs
 navbar:
-  title: "drugs_comparison_branded_vs_generic"
+  title: drugs_comparison_branded_vs_generic
   left:
   - text: Home
     href: index.html
@@ -9,6 +9,10 @@ navbar:
     href: about.html
   - text: License
     href: license.html
+  right:
+  - icon: fa-github
+    text: Source code
+    href: https://github.com/ramon-schildknecht/UK_Drug_Prescriptions_Branded_Drugs_vs_Generics
 output:
   workflowr::wflow_html:
     toc: yes

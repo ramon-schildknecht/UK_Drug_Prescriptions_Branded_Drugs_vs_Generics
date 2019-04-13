@@ -1,0 +1,297 @@
+---
+title: "Data Preparation and Exploration"
+output: html_notebook
+---
+
+# Approach (to be defined)
+
+
+```{r Libraries, message=FALSE, warning=FALSE}
+# load packages
+library(tidyverse)
+library(magrittr)
+library(DataExplorer)
+```
+
+
+# Data 
+Data understanding:
+
+- [Original source of data at NHS and essential information](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary) (28. March 2019)
+- [Glossary of terms](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary/practice-level-prescribing-glossary-of-terms) (28. March 2019) 
+- [BNF Codes](https://ebmdatalab.net/prescribing-data-bnf-codes/) (28. March 2019) 
+
+Practice level prescribing data is a list of all medicines, dressings and appliances that are prescribed by all practices in England, including GP practices, each month.
+
+## Files
+For each month there are three files:
+- Practice Prescribing Data file - this is the main data file giving the practice level prescribing data at presentation level using the full 15 digit BNF code. 
+- GP prescribing chemical substance file - this gives the chemical substance or section as appropriate using the 9 digit (Drugs) or 4 digit (Appliances) BNF code. 
+- GP prescribing practice address file - this gives the practice name and address. 
+
+
+## Read files
+
+Problems to solve:
+- which is the data model r♣egarding the 3 files? 
+- which are the headers for file T201807ADDR BNFT.CSV 
+- check columns 3 & 4 in T201807CHEM SUBS.CSV 
+- lowercase all variables and combine space separated variables with _  
+- check last column in T201807PDPI BNFT.CSV 
+
+
+```{r Read Files}
+gp <- read_csv(file = "data_files_2018_07_Jul/T201807ADDR BNFT.CSV", col_names = F)
+# col_names = c("date_month", "tbd", "practioner_1", "practioner_2") total 8
+# lower all coluns
+names(gp) %<>% tolower
+
+# rename variables with suitable headers
+names(gp) = c("period", "practice_code","practice_name","adress_1",
+                     "adress_2","adress_3","adress_4","postcode")
+
+
+chem_subs <- read_csv(file = "data_files_2018_07_Jul/T201807CHEM SUBS.CSV")
+head(chem_subs)
+chem_subs$`chem sub`
+names(chem_subs) %<>% tolower
+chem_subs %<>% select(-x4)
+chem_subs %<>%
+  mutate(`201807` = coalesce(`201807`, "201807")) %>% 
+  select(year_month = `201807`, chem_sub = `chem sub`, everything())
+
+
+# plpd = Practice level prescribing data
+plpd <- read_csv(file = "data_files_2018_07_Jul/T201807PDPI BNFT.CSV")
+head(plpd)
+names(plpd) %<>% tolower
+
+
+# check last column: it is just an empty column
+read_lines(file = "data_files_2018_07_Jul/T201807PDPI BNFT.CSV", n_max = 10)
+
+# drop empty column x11
+plpd %<>% select(-x11)
+
+
+# rename variables containing ''
+plpd %<>%
+  select(bnf_code = `bnf code`, bnf_name = `bnf name`, act_cost = `act cost`, everything())
+
+# preparation inputs from Philipp Hochueli 
+## drop non proper BNF-codes (less than 15 characters)
+plpd_smaller %<>% 
+  mutate(bnf_code_length = nchar(bnf_code)) %>% 
+  filter(bnf_code_length < 15) %>% 
+  select(-bnf_code_length)
+
+## drop actual costs & quantity
+plpd %<>% select(-c(act_cost, quantity))
+
+# cast to right datatype
+plpd$nic <- as.double(plpd$nic)
+plpd$items <- as.integer(plpd$items)
+
+# generate 5% plpd sample regarding computing efficiency
+set.seed(22)
+plpd_sample <- sample_frac(plpd, 0.05)
+summary(plpd_sample)
+glimpse(plpd_sample) 
+
+rm(dlpd)
+
+```
+
+# Data Model
+Possible solution:
+
+- extract chemical substance from bnft table from the attribute "bnf_name". connect the chemical substance from the bnft with the chem_subs file (attribute "chem_sub"). Assumption: mapping with the first 9 signs, example: 040702040 
+- *what about the  4 digit (Appliances) BNF code?* 
+- Attribute "practice" from bnft table can be connected with the second attribute (name tbd) from the adrr table, example: B86057 
+
+```{r Data Model}
+# extract chem_sub in plpd
+plpd_sample %<>% 
+  mutate(chem_sub = str_sub(bnf_code, 1, 9))
+
+# join plpd with gp & chem_subs
+d <- left_join(x = plpd_sample, y = gp, by = c("practice" = "practice_code"), suffix = c(".plpd", ".gp")) %>%
+  left_join(chem_subs, by = "chem_sub") %>% 
+  select(bnf_code, bnf_name, chem_sub_code = chem_sub, chem_name = name, items, nic, 
+         practice_code = practice, practice_name, sha, adress_1,
+         adress_2, adress_3, adress_4, postcode, period = period.plpd)
+# not including pct because sha is better according to Philipp Hochueli
+
+# split bnf_name into drug_dressing_appliances, forms & dosages with tidyr
+d %<>%
+  separate(bnf_name, into = c("drug_dressing_appliances", "form"),
+           sep = "_", remove = FALSE) %>% 
+  separate(form, into = c("form", "dosage"),
+           sep = " ", remove = TRUE, extra = "merge") 
+# check error message: Expected 2 pieces. Missing pieces filled with `NA` in 10 rows [22980, 30494, 110893, 213266, 270869, 305394, 312425, 341193, 360483, 366071].Expected 2 pieces. Missing pieces filled with `NA` in 25704 rows [23, 53, 55, 112, 150, 165, 185, 213, 229, 246, 271, 276, 307, 326, 426, 440, 457, 519, 526, 553, ...].
+
+d %<>% 
+  mutate(nic_item = nic/items)
+
+# write_csv(x = d, path = "plpd_extended.csv")
+
+
+```
+
+
+```{r Load sample data directly}
+# load preprocessed data
+d <- read_csv("plpd_extended.csv")
+```
+
+
+# Data Exploration
+```{r Data Exploration}
+glimpse(d)
+
+# explore data with DataExplorer package
+introduce(d)
+plot_intro(d)
+plot_missing(d)
+
+# explore numerical values
+# create_report(d[, c("items", "nic")])
+
+```
+
+
+
+
+# Scope 
+
+## What we can't answer with the given data
+
+You can't:
+
+- download data for only one practice or subset of practices - the data is contained in a single large data file 
+- compare one practice with another without further information about prescribing, list sizes, age and gender of patients on the list, knowledge about the medicines and why they are prescribed 
+- identify individual patients, even those receiving medication for rare conditions, because no patient data is contained in the data 
+- find out how many people with a particular condition have been given prescriptions - prescriptions given to patients do not say why the drug has been prescribed 
+- find out which pharmacies dispensed these prescriptions 
+- find out about private prescrptions - these are not included in the data 
+- find out the proportion of prescriptions that were paid for by patients or exempt from payment 
+
+With this data set alone it is not possible to work out the prescribing rate - the percentage of patients receiving prescriptions. You would need additional data on the number of patients registered with a practice which can be found on the NHS Business Services Authority website. 
+
+[Source](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary/practice-level-prescribing-data-more-information) (04.04.2019). 
+
+
+```{r Branded drugs & Generics}
+# Code Lars
+
+
+# create a DF that contains every generic drug just once
+generic_list <- d %>%
+  filter(str_sub(bnf_code,10,11) == 'AA') %>% #drugs with no 'AA' at bnf letter 10 and 11 branded (no generics)
+  group_by(bnf_code, bnf_name, drug_dressing_appliances, form, dosage, chem_name) %>%
+  summarise(nic_sum=sum(nic), items_sum=sum(items)) %>%
+  ungroup()
+generic_list <- generic_list[order(generic_list$items_sum,decreasing=TRUE),] # order list for 'item_sum'
+# create a key for later join with the branded drug
+generic_list %<>% 
+  mutate(bnf_key = paste(str_sub(bnf_code, 1, 9), str_sub(bnf_code,12,13), sep="")) %>% 
+  mutate(nic_per_item = nic_sum/items_sum) # calculate nic per item
+generic_list <- generic_list[c(9,1,2,3,4,5,6,7,8,10)]
+
+# create a DF that contains every original drug just once
+branded_list <- d %>%
+  filter(str_sub(bnf_code,10,11) != 'AA') %>% #drugs with 'AA' at bnf letter 10 and 11 are generics
+  group_by(bnf_code, bnf_name, drug_dressing_appliances, form, dosage, chem_name) %>%
+  summarise(nic_sum=sum(nic), items_sum=sum(items)) %>%
+  ungroup()
+branded_list <- branded_list[order(branded_list$items_sum,decreasing=TRUE),]
+# create a key for later join with the generic drug
+branded_list %<>% 
+  mutate(bnf_key = paste(str_sub(bnf_code, 1, 9), str_sub(bnf_code,14,15), sep="")) %>%
+  mutate(nic_per_item = nic_sum/items_sum) # calculate nic per item
+branded_list <- branded_list[c(9,1,2,3,4,5,6,7,8,10)]
+
+complete_list <- d %>%
+  group_by(bnf_code) %>%
+  summarise(nic_sum=sum(nic), items_sum=sum(items)) %>%
+  ungroup()
+
+# left join for every branded drug the generic drug next to it. ->  verify if there is a drug with two or more generics
+med_list <- left_join(x = branded_list, y = generic_list, by = c("bnf_key"), suffix = c("_branded", "_generic"))
+med_list_a <- med_list %>% select(bnf_code_branded, bnf_name_branded, bnf_code_generic, bnf_name_generic)
+
+
+# plausability check
+# number of generics in 'generic_list': 3537
+# number of generics in 'med_list': 
+# number of unique generics in 'med_list: 
+
+
+# Which drug is more expensive?
+orginal_expensiv <- med_list %>%
+  filter(med_list$nic_per_item_branded > med_list$nic_per_item_generic)
+generic_expensiv <- med_list %>%
+  filter(med_list$nic_per_item_branded < med_list$nic_per_item_generic)
+
+boxplot(med_list$nic_per_item_branded, med_list$nic_per_item_generic, 
+        names=c("Branded","Generic"))
+
+# explore data with DataExplorer package
+introduce(branded_list)
+plot_intro(branded_list)
+plot_missing(branded_list, title = "Branded")
+
+introduce(generic_list)
+plot_intro(generic_list)
+plot_missing(generic_list, title = "Generics")
+
+attach(med_list)
+# inspect correlation and N/A values
+create_report(med_list[, c("nic_sum_branded", "nic_sum_generic", "items_sum_branded", "items_sum_generic", "nic_per_item_branded", "nic_per_item_generic")])
+
+```
+
+```{r Question x}
+# Wie viele Branded-Products haben ein Generika? Wie viele Branded-Products haben kein Generika?
+plot_ly(x = ~items_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25)
+
+
+
+
+```
+
+
+```{r Question xx}
+# Wie ist der Preisunterschied zwischen Branded-Products und Generikas? Sind Generikas billiger?
+library(plotly)
+
+# comparisons branded vs. generic
+## add price per item difference
+med_list %>% 
+  mutate(diff_branded_to_generic = nic_per_item.original - nic_per_item.generic)
+
+attach(med_list)
+
+## show distribution comparison price sum
+(p_nic_sum <- plot_ly(x = ~nic_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~nic_sum.original, name = 'Original price sum'))
+
+
+## show distribution comparison price per item 
+(p_nic_per_item <- plot_ly(x = ~nic_per_item.generic, name = "Generic price per item", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~nic_per_item.original, name = 'Original price per item'))
+
+## calculate price per item difference 
+
+
+
+## show distribution comparison sum total 
+(p_items_sum <- plot_ly(x = ~items_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~items_sum.original, name = 'Original price sum'))
+
+
+```
+
+
+
+

@@ -1,4 +1,4 @@
-# drugs_comparison_branded_vs_generic
+# UK_Drug_Prescriptions_Branded_Drugs_vs_Generics
 
 A [workflowr][] project.
 

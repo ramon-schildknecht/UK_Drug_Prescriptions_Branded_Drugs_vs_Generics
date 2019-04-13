@@ -11,17 +11,18 @@ output: html_notebook
 library(tidyverse)
 library(magrittr)
 library(DataExplorer)
+library(plotly)
 ```
 
 
 # Data 
+Practice level prescribing data is a list of all medicines, dressings and appliances that are prescribed by all practices in England, including GP practices, each month.
+
 Data understanding:
 
 - [Original source of data at NHS and essential information](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary) (28. March 2019)
 - [Glossary of terms](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary/practice-level-prescribing-glossary-of-terms) (28. March 2019) 
 - [BNF Codes](https://ebmdatalab.net/prescribing-data-bnf-codes/) (28. March 2019) 
-
-Practice level prescribing data is a list of all medicines, dressings and appliances that are prescribed by all practices in England, including GP practices, each month.
 
 ## Files
 For each month there are three files:
@@ -32,15 +33,15 @@ For each month there are three files:
 
 ## Read files
 
-Problems to solve:
-- which is the data model r♣egarding the 3 files? 
-- which are the headers for file T201807ADDR BNFT.CSV 
+Problems we solved:
+- which is the data model regarding the 3 files? 
+- which are the headers for file T201807ADDR BNFT.CSV? 
 - check columns 3 & 4 in T201807CHEM SUBS.CSV 
 - lowercase all variables and combine space separated variables with _  
-- check last column in T201807PDPI BNFT.CSV 
+- check last column in T201807PDPI BNFT.CSV and deal with it in an appropriate way 
 
 
-```{r Read Files}
+```{r Read Files, eval=FALSE, include=FALSE}
 gp <- read_csv(file = "data_files_2018_07_Jul/T201807ADDR BNFT.CSV", col_names = F)
 # col_names = c("date_month", "tbd", "practioner_1", "practioner_2") total 8
 # lower all coluns
@@ -99,7 +100,6 @@ summary(plpd_sample)
 glimpse(plpd_sample) 
 
 rm(dlpd)
-
 ```
 
 # Data Model
@@ -109,7 +109,7 @@ Possible solution:
 - *what about the  4 digit (Appliances) BNF code?* 
 - Attribute "practice" from bnft table can be connected with the second attribute (name tbd) from the adrr table, example: B86057 
 
-```{r Data Model}
+```{r Data Model, eval=FALSE, include=FALSE}
 # extract chem_sub in plpd
 plpd_sample %<>% 
   mutate(chem_sub = str_sub(bnf_code, 1, 9))
@@ -180,11 +180,15 @@ With this data set alone it is not possible to work out the prescribing rate - t
 
 [Source](https://digital.nhs.uk/data-and-information/areas-of-interest/prescribing/practice-level-prescribing-in-england-a-summary/practice-level-prescribing-data-more-information) (04.04.2019). 
 
+## Questions to be answered 
+*to be added*
 
-```{r Branded drugs & Generics}
-# Code Lars
+# Analysis
+
+## Merge Branded drugs & generics
 
 
+```{r Branded drugs & generics}
 # create a DF that contains every generic drug just once
 generic_list <- d %>%
   filter(str_sub(bnf_code,10,11) == 'AA') %>% #drugs with no 'AA' at bnf letter 10 and 11 branded (no generics)
@@ -247,45 +251,52 @@ plot_missing(generic_list, title = "Generics")
 
 attach(med_list)
 # inspect correlation and N/A values
-create_report(med_list[, c("nic_sum_branded", "nic_sum_generic", "items_sum_branded", "items_sum_generic", "nic_per_item_branded", "nic_per_item_generic")])
+# create_report(med_list[, c("nic_sum_branded", "nic_sum_generic", "items_sum_branded", "items_sum_generic", "nic_per_item_branded", "nic_per_item_generic")])
+plot_missing(med_list)
+plot_histogram(med_list)
 
+# data_representation_for_slides <- med_list %>% 
+#   select(1:2, 8:10, 11:12, 17:19)
 ```
 
 ```{r Question x}
 # Wie viele Branded-Products haben ein Generika? Wie viele Branded-Products haben kein Generika?
-plot_ly(x = ~items_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25)
+(med_list_missing_values <- as.factor(sapply(med_list, function(x) sum(is.na(x)))))
+(missing_ration <- as.numeric(levels(med_list_missing_values)[med_list_missing_values])[11]/
+  length(bnf_code_branded))
 
-
-
-
+# @Lars: how many generica don't have a fitting branded drug?
 ```
+
+There are 1260 missing values for the generics data. There are totally 4142 in our joined branded drugs and generics table. The missing ratio is therefore about 30%. Conclusion: There are close to 70% of all branded drugs with a generic. 
 
 
 ```{r Question xx}
 # Wie ist der Preisunterschied zwischen Branded-Products und Generikas? Sind Generikas billiger?
-library(plotly)
 
 # comparisons branded vs. generic
 ## add price per item difference
-med_list %>% 
-  mutate(diff_branded_to_generic = nic_per_item.original - nic_per_item.generic)
+med_list %<>% 
+  mutate(diff_branded_to_generic = nic_per_item_branded - nic_per_item_generic)
 
 attach(med_list)
 
 ## show distribution comparison price sum
+### to do: I must need the branded_list as well as the generic_list here ### 
 (p_nic_sum <- plot_ly(x = ~nic_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
   add_trace(x = ~nic_sum.original, name = 'Original price sum'))
 
 
 ## show distribution comparison price per item 
-(p_nic_per_item <- plot_ly(x = ~nic_per_item.generic, name = "Generic price per item", type = "box", boxpoints = "all", jitter = 0.25) %>%
-  add_trace(x = ~nic_per_item.original, name = 'Original price per item'))
+(p_nic_per_item <- plot_ly(x = ~nic_per_item_generic, name = "Generic price per item", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~nic_per_item_branded, name = 'Original price per item'))
 
 ## calculate price per item difference 
 
 
 
 ## show distribution comparison sum total 
+### to do: I must need the branded_list as well as the generic_list here ### 
 (p_items_sum <- plot_ly(x = ~items_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
   add_trace(x = ~items_sum.original, name = 'Original price sum'))
 

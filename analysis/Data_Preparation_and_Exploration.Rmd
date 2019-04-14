@@ -12,6 +12,7 @@ library(tidyverse)
 library(magrittr)
 library(DataExplorer)
 library(plotly)
+library(skimr)
 ```
 
 
@@ -139,7 +140,7 @@ d %<>%
 ```
 
 
-```{r Load sample data directly}
+```{r Load sample data directly, message=FALSE, warning=FALSE}
 # load preprocessed data
 d <- read_csv("plpd_extended.csv")
 ```
@@ -259,8 +260,14 @@ plot_histogram(med_list)
 #   select(1:2, 8:10, 11:12, 17:19)
 ```
 
+
+
+
+## Questions: How many branded drugs have an equal generic? How many branded products do not have a generic?
+
 ```{r Question x}
 # Wie viele Branded-Products haben ein Generika? Wie viele Branded-Products haben kein Generika?
+skim(med_list)
 (med_list_missing_values <- as.factor(sapply(med_list, function(x) sum(is.na(x)))))
 (missing_ration <- as.numeric(levels(med_list_missing_values)[med_list_missing_values])[11]/
   length(bnf_code_branded))
@@ -268,40 +275,86 @@ plot_histogram(med_list)
 # @Lars: how many generica don't have a fitting branded drug?
 ```
 
-There are 1260 missing values for the generics data. There are totally 4142 in our joined branded drugs and generics table. The missing ratio is therefore about 30%. Conclusion: There are close to 70% of all branded drugs with a generic. 
+Answer: There are 1260 missing values for the generics data. There are totally 4142 in our joined branded drugs and generics table. The missing ratio is therefore about 30%. Conclusion: There are close to *70% (about 2900) of all branded drugs with a generic and 30% (about 1242) vice versa*.
 
 
-```{r Question xx}
+
+
+## Question: How is the price difference between branded drugs & generics?
+
+Approach: Compare the branded drugs prices (sum & per item) with the generic prices (sum & per item) as well as the sold items sum of both of them. 
+
+
+```{r Question xx, warning=FALSE}
 # Wie ist der Preisunterschied zwischen Branded-Products und Generikas? Sind Generikas billiger?
 
-# comparisons branded vs. generic
+# comparisons branded drugs vs. generic
 ## add price per item difference
 med_list %<>% 
   mutate(diff_branded_to_generic = nic_per_item_branded - nic_per_item_generic)
 
 attach(med_list)
 
+
 ## show distribution comparison price sum
-### to do: I must need the branded_list as well as the generic_list here ### 
-(p_nic_sum <- plot_ly(x = ~nic_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
-  add_trace(x = ~nic_sum.original, name = 'Original price sum'))
+(p_nic_sum <- plot_ly(x = ~generic_list$nic_sum, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~branded_list$nic_sum, name = 'Branded price sum') %>%
+  layout(title = "Price sum comparison"))
+## compare mean
+summary(generic_list$nic_sum)
+summary(branded_list$nic_sum)
 
 
 ## show distribution comparison price per item 
 (p_nic_per_item <- plot_ly(x = ~nic_per_item_generic, name = "Generic price per item", type = "box", boxpoints = "all", jitter = 0.25) %>%
-  add_trace(x = ~nic_per_item_branded, name = 'Original price per item'))
-
-## calculate price per item difference 
-
+  add_trace(x = ~nic_per_item_branded, name = 'Branded price per item') %>%
+  layout(title = "Price per item comparison"))
 
 
-## show distribution comparison sum total 
-### to do: I must need the branded_list as well as the generic_list here ### 
-(p_items_sum <- plot_ly(x = ~items_sum.generic, name = "Generic price sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
-  add_trace(x = ~items_sum.original, name = 'Original price sum'))
+## show distribution comparison difference price per item
+(
+  p_nic_per_item_difference_boxplot <-
+  plot_ly(
+  x = ~diff_branded_to_generic,
+  type = "box",
+  name = " ",
+  boxpoints = "all",
+  jitter = 0.25
+  ) %>%
+  layout(title = "Item price branded drug - generic price")
+  )
+
+summary(diff_branded_to_generic)
+
+(p_nic_per_item_difference_hist <- plot_ly(x = ~diff_branded_to_generic, type = "histogram", histnorm = "probability", alpha = 0.5, nbinsx = 2000) %>% 
+  layout(title = "Frequency item price branded drug - generic price",
+         xaxis = list(title = "item price branded drug - generic price",
+                      zeroline = FALSE),
+         yaxis = list(title = "Frequency",
+                      zeroline = FALSE)))
 
 
+
+## show distribution comparison items sold sum total 
+(p_item_sum <- plot_ly(x = ~generic_list$items_sum, name = "Generic sold items sum", type = "box", boxpoints = "all", jitter = 0.25) %>%
+  add_trace(x = ~branded_list$items_sum, name = 'Branded sold items sum') %>%
+  layout(title = "Item sold sum comparison"))
+## compare mean
+summary(generic_list$items_sum)
+summary(branded_list$items_sum)
+
+detach(med_list)
 ```
+
+Answers: 
+
+- The total price of the sold generics is much higher for generics (median = ~833) than for branded drugs (median = ~265). The generics price sum variates much more than the branded drugs one. This numbers are caused by the totally more sold generics (65% of all items sold). 
+- The price per item comparison shows that the branded drugs are overall 0.18 pounds more expensive (median). The first quartile tells us that 25% of all comparisons are at least 2.71 pound cheaper (generics vs. branded drugs). There are on the other side 25% of all comparisons at least 4.82 pound more expensive (branded drugs vs. generics). The mean is much different with ~3.1 pound more expensive branded drugs because it is influenced a lot by outliers. That's why the median is more suitable in this case. *Outlook: one should compare prices with classes, for example by drug chapters*. 
+- Generics represent total sold items of 35 (median) vs. branded drugs with 12 (median). This means there are in average about three times more sold generics then branded drugs! The total sold items of generics  spread much more than the branded drugs. The mean confirms the discovery: Generics are in average sold 1041 times versus 168 times (generic drugs). There are a lot of outliers in this case, too. Therefore it is reasonable to stay with the median.    
+
+
+
+
 
 
 
